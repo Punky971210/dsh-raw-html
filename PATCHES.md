@@ -158,6 +158,31 @@ Error: dsh: plugin tree failed to load: ... Cannot find package '@deepseek-ai/ds
 
 ---
 
+## P-3 路径白名单契约（迁移自已弃用文件桥 · 2026-09-18）
+
+**来源**：`D:\dsh\dsh-file-portal\src\core\paths.ts`（该模块有单测与契约测试覆盖；文件桥本体
+**已弃用、不再进入运行考虑**，源码仅作参考留存）。迁移清单与其余待定项见
+`D:\AI_Workspace\DSH\DSH\reports\file-portal-design-harvest-20260918.md`。
+
+**改动内容**（`lib/index.js`；路由与 `file_download_link` 工具**必须同一套判定**，否则会出现
+「工具说可下载、路由返回 403」的错位）：
+
+1. **fail-closed 校验顺序**：空 → NUL → `..` 段 → UNC/设备路径 → 相对则锚定会话工作区 →
+   两侧 realpath → **按路径段判定包含** → 拒非普通文件；
+2. **禁止 `startsWith` 做包含判定**（弱判定：会接受同名前缀兄弟目录 `<root>-evil/`），
+   改用 `path.relative()` 段判定（`fileContainedIn`；Windows 下经 `fileSamePath` 大小写不敏感）；
+3. **`forbiddenRoot` 优先**：`~/.dsh` 下的凭据 / 密钥 / 配置**一律拒绝**，即使某个白名单根命中；
+4. **相对路径支持**：候选可相对会话工作区给出（旧实现只收绝对路径，现已不再要求）。
+
+**实测（八态全绿；浏览器内真实请求）**：工作区内 200 · 相对路径 200 · 工作区外 403 ·
+`..` 段 403 · UNC 403 · 设备路径 403 · `~/.dsh` 下文件 403 · 不存在 404。
+探针：`probes/cdp-path-contract-probe.mjs`（本机工作区）。
+
+**注意**：宿主 home 被整体拒绝意味着——若某个会话工作区本身设在 `~/.dsh` 之下，该会话的文件将一律
+403（安全默认，与文件桥同口径，如需例外再单独设计）。
+
+---
+
 ## 如何合并上游更新
 
 ```powershell
