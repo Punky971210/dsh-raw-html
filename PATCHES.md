@@ -31,9 +31,37 @@
 反过来，`webServer.register` 注册的裸路由（插件的 `/fonts`、`/vendor`）**没有任何鉴权**——
 绝不可用它注册文件读取。
 
-**能力位前置**：宿主未提供 `connection.fetch.register` 时静默跳过（不抛错、不影响渲染与字体功能）。
-
 **扩展点（待办，不属本次改动）**：token / 一次性核销 / 配额 / 上传口，统一挂本路由。
+
+---
+
+## P-1 修订（2026-09-18 · 通路更换；上文第 26–33 行的通路说明已被实测证伪，以本节为准）
+
+**原实现**：`connection.fetch.register`（exact Fetch route，path 必须在 `/api` 之下，
+靠 `/api` 前缀路由上的 Host/Origin fence 与 cookie 鉴权）。
+
+**实测：该通路对本插件不可用。** 加诊断日志后重启复现：
+
+```
+[raw-html] file route 注册成功: /api/dsh-raw-html/file | route 表命中=true | route 表大小=3
+[raw-html] file route 延迟回读(5s): 命中=false 大小=5          ← 注册被清理
+```
+
+页面内请求恒 404，响应体是 connection shared handler 的兜底文案 `"not found"`（9 字节）；
+同一页面对宿主自带的 `/api/file` 请求返回 200 —— 说明分发机制正常，被清理的只是本插件这条
+（宿主那条由 session-controller 在内核编排期注册，故稳定）。
+
+**现实现**：改用插件自己的 `webServer.register({kind:'prefix'})`（与 `/fonts`、`/vendor`
+同处一个 effect，生命周期随插件），鉴权移到 handler 内复用 `connection.requestRejection(req)`
+（与 `/api` 同一套 Host/Origin fence + 浏览器 cookie 校验）；取不到 connection 服务时一律 **401**，
+绝不裸放行。connection 在**请求时**动态取（`ctx.get('connection')`），不依赖注入时机。
+
+**路由随之变更**：`/api/dsh-raw-html/file` → **`/dsh-raw-file`**（避开 RPC 通道前缀
+`/dsh-raw-html` 与 `/api` 命名空间）。
+
+**重启后零依赖判据**：`GET /dsh-raw-file?path=x`（无 cookie）应返回 **401**（= 已注册且鉴权在拦）；
+返回 404 即未注册。带 cookie 的页面内请求才是 200 / 403 / 404 / 413 四态。
+**插件文件改动必须重启宿主**；前端补丁改动只需刷新页面 —— 两者不要混。
 
 ---
 
