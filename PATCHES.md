@@ -120,6 +120,44 @@
 
 ---
 
+## P-2 可发现性：常驻能力段 + `file_download_link` 工具（2026-09-18）
+
+**问题**：下载能力的说明原本写在 VCP 协议段内，而那段以 `render` 开关为条件
+（`text: () => render ? 协议全文 : DISABLED_TEXT`）⇒ **关掉渲染就无人知晓**。
+实测：`render` 默认 `false` 且状态文件不存在 ⇒ 该实例上**所有会话的 agent 都看不到这个能力**。
+
+**改法**（两条互补）：
+1. **常驻段**：`systemPrompt.section({ name: 'raw-html:file-download', order: 210, text: () => FILE_CAPABILITY_TEXT })`
+   —— 不受 `render` 约束，每轮注入，任何会话都能看到；
+2. **工具**：`file_download_link`（入参 `path` / `inline` / `origin`）→ 返回**可粘贴的纯文本 URL**，
+   **不依赖 HTML 渲染开关**；已校验存在性 + 会话工作区白名单 + 20 MiB 上限。`inject` 增加 `tools`。
+
+### ⚠️ 事故与红线（务必遵守）：第三方 import 会让整个插件加载失败
+
+首次实现时在文件顶部写了 `import { defineTool } from '@deepseek-ai/dsh-tools'`，实机启动**直接崩**：
+
+```
+Error: dsh: plugin tree failed to load: ... Cannot find package '@deepseek-ai/dsh-tools'
+       imported from D:\dsh\dsh-raw-html\lib\index.js
+[ERR_MODULE_NOT_FOUND]
+```
+
+根因：本项目从 git 获取，**分发形态没有 `node_modules`**，ESM 从 `lib/index.js` 向上逐级找
+`node_modules` 全部落空。这正是上游 README「依赖声明铁律」警告过的情形。
+**危险性**：插件加载失败会让**整个 plugin tree 起不来**（不是单个工具不可用）——
+若在役宿主此时重启，会直接起不来。
+
+**现约定**：
+- `@deepseek-ai/dsh-tools` 只用 **动态** `import()` 解析，失败则降级为「不注册工具」，
+  插件其余功能（渲染、字体、文件路由）照常工作；
+- `apply` 因此是 `async`（cordis 支持）；
+- 本机若要让工具真正注册，需保证该包可解析：本机做法是在插件目录下建
+  `node_modules/@deepseek-ai/dsh-tools` → junction 指向宿主内核的同名包
+  （已被 `.gitignore` 忽略，不进仓库）；
+- 新增任何第三方 `import` 前，先跑一次 `node -e "import('file:///.../lib/index.js')"` 自检。
+
+---
+
 ## 如何合并上游更新
 
 ```powershell
