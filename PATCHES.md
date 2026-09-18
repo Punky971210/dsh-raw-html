@@ -86,3 +86,20 @@ git push origin main --force-with-lease
 - 补丁负责「HTML 能被渲染」⇒ 卡片里的 `<img>` / `<a download>` 才能成立
 - P-1 负责「文件字节可取」⇒ 下载有服务端语义（Content-Disposition）
 两者都不在岗位时可分别回滚。
+
+### 前端补丁含「非可信内容拦截」（2026-09-18 增补）
+
+同一适配器（`raw-html-016-adapter.mjs`）另注入一段**非可信标签拦截**到宿主 DOM→vdom 函数
+（`C8`）体首，形态对齐上游 `patch/trusted-patch.cjs` 的**条件式**：`window.__vcpTrusted()`
+为真（可信模式开启）才放行，默认一律丢弃该节点及其子树。
+
+丢弃清单：`script` / `iframe` / `object` / `embed`（与上游 SCRIPT_FILTER 一致）
++ `link` / `base` / `meta`（本地扩展）。
+
+依据（实测）：`<script>` 经 React 的 createElement 路径**会真实执行**（同源任意 JS）；
+`<iframe>` 挂载即加载外部页面；`<base>` 可篡改卡片内相对 URL 的解析基准；
+`<meta http-equiv="refresh">` 可用于跳转；`<link rel=stylesheet>` 可外联 CSS。
+`<style>` 予以保留（卡片样式一律内联，且其 `@import` / `url()` 外联面属已知剩余项）。
+
+复验脚本：`D:\AI_Workspace\DSH\DSH\probes\cdp-tag-filter-probe.mjs`
+（期望：七类标签在 vdom 内均为 `null`，而 `<style>` 保留、`javascript:` href 与 `file://` src 仍被剥离）。
